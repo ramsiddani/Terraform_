@@ -1,0 +1,936 @@
+======================== Cross-Resource Attribute references ================
+
+In a single terraform file, we can define two different resources.
+for ex, resource2 might dependent on the value of the resource1.
+
+If two resources are there, resource1 -> elastic IP,  resource2 -> security group
+Here, resource2 needs to take the IP address from the resource1 in the form of attribute..
+
+-- Attributes
+
+Each resource has it's associated set of attributes
+
+Attributes are the fields in a resource that holds the values that end up in a state.
+
+for ex, if EC2 instace is created and it also has certain attributes are added as part of state file.
+so that other resources that are dependent om this EC2 instace reference to these set of attributes...
+
+ID, public_id, private_id, public_dns ---> some attributes....
+
+Terraform allows us to reference the attribute of one resource to be used in a different resource..
+
+### refrence_attributes.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+# Creating Elastic_IP
+resource "aws_eip" "lb" {
+  domain = "vpc"
+}
+
+# Creating Security group
+resource "aws_security_group" "allow_tls" {
+  name = "allow_tls"
+  description = "Allow TLS inbound traffic"
+
+  ingress {
+    description = "TLS from VPC"
+    from_port = 443
+    to_port = 443
+    protocol = "tcp"
+    cidr_blocks = ["${aws_eip.lb.public_ip}/32"]
+  }
+
+  egress {
+    from_port        = 0
+    to_port          = 0
+    protocol         = "-1"
+    cidr_blocks      = ["0.0.0.0/0"]
+    ipv6_cidr_blocks = ["::/0"]
+  }
+
+  tags = {
+    Name = "allow_tls"
+  }
+}
+
+$ terraform apply -auto-approve
+
+============================== Output Values ===============================
+
+output vales make information about infrastructure available on the commandline,
+and can expose information for other terraform configuration to use
+
+Output values defined in Project A can be referenced from code in Project B as well...
+
+## output_values.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_eip" "Elastic_IP" {
+  domain = "vpc"
+}
+
+output "Eip_public_ID" {
+  #value = "The public IP of EIP is : ${aws_eip.Elastic_IP.public_ip}"
+  value = aws_eip.Elastic_IP  # Shows all the output values of the EIP
+}
+
+$ terraform apply auto-approve
+
+
+================================ Terraform Variables ===========================
+
+We can have central source from which we can import the values from
+
+we can create a one central source where all the dynamic values is stored.
+in terraform files we define variables to access the values from the central source.
+so that each time when values changes in central source we need not to update the values in terraform file.
+
+## variables.tf
+variable "vpn_IP" {
+  default = "192.168.12.1/32"
+}
+
+## varibles_demo.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_security_group" "allow_tls" {
+  name        = "allow_tls"
+  description = "Allow TLS inbound traffic"
+
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 443
+    to_port          = 443
+    protocol         = "tcp"
+    cidr_blocks      = [var.vpn_IP]
+  }
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 80
+    to_port          = 80
+    protocol         = "tcp"
+    cidr_blocks      = [var.vpn_IP]
+  }
+  ingress {
+    description      = "TLS from VPC"
+    from_port        = 53
+    to_port          = 53
+    protocol         = "tcp"
+    cidr_blocks      = [var.vpn_IP]
+  }
+  tags = {
+    Name = "allow_tls"
+  }
+}
+
+
+============================= Approaches to Variables Assignments =======================
+
+Assign values in multiple ways
+
+. Environmental variables	--> export TF_VAR_instance_type="t2.large"
+. Command Line Flags	--> $ terraform plan -var="instancetype=t2.small"  
+. From a File			terraform.tfvars --> all the values associated with the variable can be part of this file...
+. Variable Defaults		--> If no explicit value mentioned for a variable, then default value is assigned to it..
+
+### variables.tf 
+variable "instance_type" {
+  default = "t2.micro"
+}
+variable "ami_value" {
+  default = "ami-0c7217cdde317cfec"
+}
+
+If no explicit value defined in the terraform, then terraform make use this default value.
+
+## ec2_variable.tf
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_instance" "ec2_var" {
+  ami = var.ami_value
+  instance_type = var.instance_type
+}
+
+## terraform.tfvars
+instance_type = "t2.small"
+ami_value = "ami-0c7217cdde317cfec"
+
+If we don not have the same name terraform.tfvars file, then we will have to explicitly specify the file name
+
+## custom.tfvars
+vpn_IP = "192.168.12.1/32"
+instance_type = "t2.small"
+ami_value = "ami-0c7217cdde317cfec"
+
+$ terraform plan -var-file="custom.tfvars"
+
+====================================== Data types for Variables =========================
+
+Whenever we specify the type argument with in a variable block, that will restrict the type of value that will accepted as the value for a variable..
+
+varibale "img_id" {
+	type = string			
+}
+if no type constraint is specified then value of any type is accepted...
+
+## varibale.tf
+variable "iam_user_number" {
+  type = number
+}
+
+## ec2_datatypes.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_iam_user" "iam_user" {
+  name = var.iam_user_number
+  path = "/system/"
+}
+
+$ terraform plan 
+
+. string --> sequence of unicode characters  EX : "hello"
+. list	 --> sequential list of characters identified by their position. starts with 0. EX : ["vvrm", "JRG"]
+. map	 --> A group of values identified by named labels,  EX : [name="Ram", age=21]
+. number --> Ex : 199
+
+--- Example for list datatype --
+
+## varibale.tf
+variable "elbname" {
+  type = string
+}
+variable "az" { 
+  type = list
+}
+variable "timeout" {
+  type = number
+}
+
+## custom.tfvars
+elbname = "myelb"
+timeout = "400"
+az = ["us-west-1a", "us-west-1b"]
+
+## elb.tf
+provider "aws" {
+  region = "us-west-2"
+}
+
+# Create a new load balancer
+resource "aws_elb" "bar" {
+  name               = var.elbname
+  availability_zones = var.az
+
+  listener {
+    instance_port     = 8000
+    instance_protocol = "http"
+    lb_port           = 80
+    lb_protocol       = "http"
+  }
+
+    health_check {
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+    timeout             = 3
+    target              = "HTTP:8000/"
+    interval            = 30
+  }
+
+  cross_zone_load_balancing   = true
+  idle_timeout                = var.timeout
+  connection_draining         = true
+  connection_draining_timeout = var.timeout
+
+  tags = {
+    Name = "foobar-terraform-elb"
+  }
+}
+
+$ terraform plan -var-file="custom.tfvars"
+
+
+======================= Fetching values with variables =====================
+
+## Fetching values with variables.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_instance" "myec2" {
+	ami = "ami-0c7217cdde317cfec"
+	instance_type = var.types["us-west-2"] # fetching values by map 
+	instance_type = var.list[0] # fetching values by list
+}
+
+variable "list" { 
+	type = list
+	default = ["m5.large", "m5.xlarge", "t2.medium"]
+}
+
+variable "types" { 
+	type = map
+	default = { 
+		us-east-1 = "t2.micro"
+		us-west-2 = "m5.xlarge"
+		ap-south-1 = "t2.nano"
+	}
+}
+
+============================= Count and Count Index ======================
+
+Count parameter on resources can be simply the configurations and let you scale resources by simply incrementing a number..
+
+-- count
+With count parameter, we can simply specify the count value and the resource can be scaled accordingly...
+
+resource "aws_instance" "instace-1" {
+	ami = "ami-0c7217cdde317cfec"
+	instance_type = "t2.micro"
+	count = 3
+}
+
+-- count index
+In resoirce blocks where count is set, an additional count object is available in expressions,
+so we can modify the configuration of each instance.
+
+count.index --> The distnct number (starting with 0) corrosponding to this instance..
+it fetches the index of 	each iteration in the loop...
+
+## count_parameter.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+variable "elb_names" {
+  type = list
+  default = ["dev-lb", "stage-lb", "prod-lb"]
+}
+
+resource "aws_iam_user" "lb" {
+  name = var.elb_names[count.index]
+  count = 3
+  path = "/system/"
+}
+
+===================================== Conditional Expressions =======================
+
+Uses the value of a boolean expression to select one of two values...
+
+syntax :   condition ? true_val : false_val
+if condition is then result is true_val, if condition is false then result is false_val..
+
+## conditional.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+variable "istest" {
+    default = true
+}
+
+resource "aws_instance" "dev_instance" {
+  ami = var.ami_value
+  instance_type = "t2.nano"
+  count = var.istest == true ? 3 : 0
+}
+
+resource "aws_instance" "prod_instance" {
+  ami = var.ami_value
+  instance_type = "t2.micro"
+  count = var.istest == false ? 1 : 0
+}
+
+
+======================================== Local Values =============================
+
+A local value assigns a name to an expression, it can be used to multiple times with in a module without repeating it.
+
+It can be used for multiple different use-cases like having a conditional expression
+
+locals {
+	name_prefix = "${var.name != "" ? var.name : var.default}"
+}
+
+## locals.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+locals { 
+	common_tags = { 
+		owner = "Devops Team"
+		service = "backend"
+	}
+}
+
+resource "aws_instance" "dev_instance" {
+  ami = var.ami_value
+  instance_type = "t2.nano"
+  tags = locals.common_tags
+}
+ 
+resource "aws_instance" "prod_instance" {
+  ami = var.ami_value
+  instance_type = "t2.large"
+  tags = locals.common_tags
+}
+
+resource "aws_ebs_volume" "db_ebs" {
+	availability_zone = "us-east-1"
+	size = 8
+	tags = locals.common_tags
+}
+
+
+====================================== Terraform Functions ===============================
+
+A number of built-in functions that we can use to transform and combine values...
+
+syntax : function (arg1, arg2)
+		  max (3,7,0)
+		  
+The terraform does not support user-defined functions, only built-in functions are available..
+
+$ terraform console ---> console mode...
+
+### functions.tf
+provider "aws" {
+  region = var.region
+}
+
+locals {
+  time = formatdate("DD MMM YYYY hh:mm ZZZ", timestamp()) 
+}
+
+variable "region" {
+  default = "ap-south-1"
+}
+
+variable "tags" {
+  type = list
+  default = ["first_ec2", "second_ec2"]
+}
+
+variable "ami" {
+  type = map
+  default = {
+    "us-east-1" = "ami-0c7217cdde317cfec" 
+    "ap-south-1" = "ami-03f4878755434977f"
+    "us-west-1" = "ami-0ce2cb35386fc22e9"
+  }
+}
+resource "aws_instance" "app-dev" {
+   ami = lookup(var.ami,var.region)
+   instance_type = "t2.micro"
+   count = 2
+
+   tags = {
+     Name = element(var.tags,count.index)
+   }
+}
+output "timestamp" {
+  value = local.time
+}
+
+formatdate() --> converts a timestamp into a different time format.
+timestamp() --> returns a UTC timestamp string in RFC 3339 format.
+lookup()	--> retrieves the value of a single element from a map.
+element()	--> retrieves a single element from a list.
+
+========================================= Data Sources ==========================
+
+Data sources allows data to be fetched or computed for use else where in terraform configuration.
+
+Each AMI id of the EC2 instace will differ from each regions...
+
+The data source will compute the AMI id of specific region and we can fecth the AMI id which have been computed by the data source
+with in your resource configuration...
+
+### datasources.tf
+
+provider "aws" {
+  region = "us-west-2"
+}
+
+data "aws_ami" "ami_value" {
+  most_recent = true
+  owners = ["amazon"]
+
+  filter {
+    name = "name"
+    values = ["amzn2-ami-hvm*"]
+  }
+}
+
+resource "aws_instance" "instance-1" {
+  ami = data.aws_ami.ami_value.id
+  instance_type = "t2.micro"
+}
+
+
+================================= Debugging terraform ======================
+
+Terraform has detailed logs enabled by the settings Tf_LOG environment variable to any value....
+
+we can ser Tf_LOG to one of the log levels TRACE, DEBUG, INFO, WARN, or ERROR..
+
+# export Tf_LOG=TRACE
+# export Tf_LOG_PATH=/tmp/terraform-crash.log  --> all of the TRACE messages will directly go to the terraform crash log file..
+
+
+============================== Terraform Format ======================
+
+# terraform fmt ---> rearrange/format the code...
+
+=============================== Terraform validate ===================
+
+It checks the whether a configuration is syntactically is correct..
+
+It can also checks unsupported arguments, undeclared variables.....
+
+### terraform-validate.tf
+
+provider "aws" {
+  region = "us-west-2"
+}
+resource "aws_instance" "instance-1" {
+  ami = data.aws_ami.ami_value.id
+  instance_type = "t2.micro"
+  sky = "blue"
+}
+
+$ terraform validate
+
+============================== Load Order and Semantics ===============
+
+It generally loads all the configuration files with in the directory in alphabetical order...
+
+============================= Dynamic Blocks ===========================
+
+It allows us to dynamically construct repetable nested blocks which is supported inside
+resource, data, provider, and provision blocks;
+
+-- Iterators 
+
+	The Iterator argument sets the name of a temporary variable that represents the 
+	current element of the complex value..
+	
+### dynamic_blocks.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+variable "security_groups" {
+  type = list(number)
+  description = "Ingress port numbers"
+  default = [8200, 8201, 8300, 9500]
+}
+
+resource "aws_security_group" "dynamic_security_group" {
+  name = "dynamic-sg"
+  description = "Ingress values"
+
+  dynamic "ingress" {
+    for_each = var.security_groups
+    iterator = port
+    content {
+      from_port = port.value
+      to_port = port.value
+      protocol = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+
+  dynamic "egress" {
+    for_each = var.security_groups
+    iterator = port
+    content {
+      from_port = port.value
+      to_port = port.value
+      protocol = "tcp"
+      cidr_blocks = ["0.0.0.0/0"]
+    }
+  }
+}
+
+============================ Terraform Tainting ===========================
+
+The -replace option with terraform apply to force terraform to replace an object even though 
+there are no configuration changes that would reuqire it..
+
+recreating the resource that were already cretaed through terraform....
+
+$ terraform apply -replace="aws_instance.web"  ---> It will replaces the same resource configurations.... 
+
+### taint.tf
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_instance" "instance-1" {
+  ami = data.aws_ami.ami_value.id
+  instance_type = "t2.micro"
+}
+
+$ terraform apply -replace="aws_instance.instace-1"
+
+
+========================== Splat Expressions ===============================
+
+Allows us to get a list of all attributes...
+
+### Splat_expressions.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_iam_user" "lb" { 
+	name = "iamuser.${count.index}"
+	count = 3
+	path = "/system/"
+}
+
+output "arn" { 
+	value = aws_iam_user.lb[*].arn
+}
+
+========================== Terraform Graph =====================================
+
+terraform graph command is used to generate a visual representation of either a configuration or execution plan
+
+the output of terraform graph is in the DOT format, which can easily converted to image..
+
+### graph.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_instance" "myec2" {
+  ami = "ami-0c7217cdde317cfec"
+  instance_type = "t2.micro"
+}
+
+resource "aws_eip" "elastic_ip" {
+  instance = aws_instance.myec2.id  
+}
+
+resource "aws_security_group" "allow_tls" {
+  name = "allow_tls"
+
+  ingress {
+    description = "TLS from VPC"
+    from_port = 443
+    to_port = 443
+    protocol = "tcp"
+    cidr_blocks = ["${aws_eip.elastic_ip.private_ip}/32"]
+  }
+}
+
+
+$ terraform graph > graph.dot	--> created the .dot file later we can conver this file to an image.. graphviz is a tool to convert
+
+$ cat graph.dot | dot -Tsvg > graph.svg
+
+================================= Saving terraform plan to a file =========================
+
+The generated terraform plan can be saved to specific path also...
+
+$ terraform plan -out=demopath	--> save terraform plan file
+
+$ terraform apply demopath	
+
+================================ Terraform output ============================
+
+used to extract the value of an output variable from the state file...
+
+### terraform_output.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_iam_user" "lb" { 
+	name = "iamuser.${count.index}"
+	count = 3
+	path = "/system/"
+}
+
+output "iam_names" { 
+	value = aws_iam_user.lb[*].name
+}
+output "iam_arn" { 
+	value = aws_iam_user.lb[*].arn
+}
+
+$ terraform output iam_arn
+
+
+================================ Dealing with large infra ===================
+
+We can prevent terraform from querying the current state during operations like terraform plan..
+
+* specify the -refrsh = false
+
+* specify -target=resource 
+
+### large-infra.tf
+
+provider "aws" {
+  region     = "ap-southeast-1"
+  access_key = "YOUR-KEY"
+  secret_key = "YOUR-KEY"
+}
+module "vpc" {
+  source = "terraform-aws-modules/vpc/aws"
+
+  name = "my-vpc"
+  cidr = "10.0.0.0/16"
+
+  azs             = ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]
+  private_subnets = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+  public_subnets  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+
+  tags = {
+    Terraform = "true"
+    Environment = "dev"
+  }
+}
+resource "aws_security_group" "allow_ssh_conn" {
+  name        = "allow_ssh_conn"
+  description = "Allow SSH inbound traffic"
+
+  ingress {
+    description = "SSH into VPC"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    description = "HTTP into VPC"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  egress {
+    description = "Outbound Allowed"
+    from_port   = 0
+    to_port     = 65535
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+resource "aws_instance" "myec2" {
+   ami = "ami-0b1e534a4ff9019e0"
+   instance_type = "t2.micro"
+   key_name = "ec2-key"
+   vpc_security_group_ids  = [aws_security_group.allow_ssh_conn.id]
+}
+
+$ terraform plan -refresh=false
+
+$ terraform plan -refresh=false -target=aws_security_group.allow_ssh_conn
+
+================================= Zipmap function =========================
+
+It constructs a map from a list of keys and a corrosponding list of values..
+
+### zipmap.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_iam_user" "lb" { 
+	name = "iamuser.${count.index}"
+	count = 3
+	path = "/system/"
+}
+
+output "iam_names" { 
+	value = aws_iam_user.lb[*].name
+}
+output "iam_arn" { 
+	value = aws_iam_user.lb[*].arn
+}
+output "combined" {
+	value = zipmap(aws_iam_user.lb[*].name,aws_iam_user.lb[*].arn)
+	
+
+============================== Resource behavior and meta arguments =======================
+
+A resource block declares that you want a particular infrastructure object to exist with the given settings..
+
+-- What happens if we want to change the default behavior..
+
+EX : Some modification happened in real infrastructure object that is not 
+part of terraform but we want to ignore those changes during terraform apply...
+
+Terraform allows us to include meta-argument within the resource block which allows 
+some details of this standard resource behavior to be customized on a pre-resource basis..
+
+There are multiple meta-arguments are there...
+
+### lifecycle-meta-aruguments.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_instance" "myec2" {
+   ami = "ami-0b1e534a4ff9019e0"
+   instance_type = "t2.micro"
+   
+   tags = {
+		Name = "Hello Ec2"
+   }
+   
+   lifecycle {
+		ignore_changes = [tags]
+   }
+}
+
+=========================== Meta-Arguments- LifeCycle ===================
+
+4 arguments..
+
+* create_before_destroy --> New replacement obj is created first, and the prior obj is destroyed after the replacement is created
+
+* prevent_destroy		--> Terraform to reject with an error any plan that would destroy the infra obj associated with resource
+
+* ignore_changes		--> Ignore certain changes to the live resource that does not match the configuration
+
+* replace_triggered_by	--> replaces the resource when any of the referenced items change
+
+========================== LifeCycle meta-argument- create_before_destroy ===============
+
+New replacement obj is created first, and the prior obj is destroyed after the replacement is created
+
+### create_before_destroy.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_instance" "myec2" {
+   ami = "ami-0b1e534a4ff9019e0"
+   instance_type = "t2.micro"
+   
+   tags = {
+		Name = "Hello Ec2"
+   }
+   
+   lifecycle {
+		create_before_destroy = true
+   }
+}
+$ terraform apply -auto-approve
+
+====================== LifeCycle meta-argument- Prevent destroy =======================
+
+Terraform to reject with an error any plan that would destroy the infra obj associated with resource
+
+### prevent_destroy.tf 
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_instance" "myec2" {
+   ami = "ami-0b1e534a4ff9019e0"
+   instance_type = "t2.micro"
+   
+   tags = {
+		Name = "Hello Ec2"
+   }
+   
+   lifecycle {
+		prevent_destroy = true
+   }
+}
+
+$ terraform destroy
+
+====================== LifeCycle meta-argument - ignore_changes =========================
+
+Ignore certain changes to the live resource that does not match the configuration
+
+### ignore_changes.tf
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_instance" "myec2" {
+   ami = "ami-0b1e534a4ff9019e0"
+   instance_type = "t2.micro"	# manually modify the instace type to "t1.micro" in console
+   
+   tags = {
+		Name = "Hello Ec2"
+   }
+   
+   lifecycle {
+		ignore_changes = [tags, instance_type]
+		ignore_changes = all # 
+   }
+}
+
+========================= Count argument =============================
+
+If resources are almost identical, count is appropriate..
+
+If distnct values are needed in the arguments, for_each will be used...
+
+EX : 
+	resource "aws_instance" "server" {
+		count = 4 
+		ami = "ami-1234455"
+		instance_type = "t2.micro"
+	}
+	
+======================== Datatype - SET ==========================
+
+SET is used to store multiple items in a single variable
+
+SET items are unordered and no duplicates allowed...
+
+toset() function in terraform will convert its argument to a set value...
+
+
+========================= for each ========================
+
+for_each makes use of map/set as an index value of the created resource..
+
+### for_each.tf
+provider "aws" {
+  region = "us-east-1"
+}
+resource "aws_iam_user" "lb" { 
+	for_each = toset( ["user-1", "user-2", "user-3"] )	# after executing add "user-0" at beginning.....
+	name = each.key
+}
+
+### for_each.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_instance" "myec2" { 
+	ami = "ami-0b1e534a4ff9019e0"
+	for_each = {
+		key1 = "t2.micro"
+		key2 = "t1.micro"
+	}
+	instance_type = each.value
+	key_name = each.key	 # key that will associated with the instance
+	
+	tags = {
+		Name = each.value
+	}
+}

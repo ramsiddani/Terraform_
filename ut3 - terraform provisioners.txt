@@ -1,0 +1,185 @@
+================================ Provisioners =======================
+
+Terraform should not only create EC2 instance but also automatically create configure a specific application/web-server...
+
+Used to execute scripts on a local or remote machines as part of resource creation/destruction...
+
+=============================== Types of provisioners ================
+
+2 types
+
+* local-exec
+	Allows us to invoke local executable after resource is created...
+* remote-exec 
+	Allows us to execute scripts on remote servers...
+	
+============================== Remote-exec ============================
+
+### provisioner.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_instance" "myec2" {
+  ami = "ami-079db87dc4c10ac91"					# Aws linux os
+  instance_type = "t2.micro"
+  key_name = "terraform-key"					# keypair file name
+
+  provisioner "remote-exec" {
+    inline = [ 
+        "sudo amazon-linux-extras install -y nginx1.12",
+        "sudo systemctl start nginx"
+     ]
+     connection {
+       type = "ssh"
+       host = self.public_ip
+       user = "ec2-user"
+       private_key = "${file("./terraform-key.pem")}"		# Copy the .pem key pair file...
+     }
+  }
+}
+
+NOTE : If default security group is assigned while creating the EC2, then edit the inbound rules... port 80 and port 22 should allow everyon (0.0.0.0/0)
+  
+
+============================== local-exec ==============================
+
+remote-exec will run a piece of code in inside the server...while local-exec will not run code inside the server.
+It will run the code in the local machine where the terraform has been invoked...
+
+### local-exec.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_instance" "myec2" {
+  ami = "ami-079db87dc4c10ac91"					# Aws linux os
+  instance_type = "t2.micro"
+  
+  provisioner "local-exec" { 
+	command = "echo ${aws_instance.myec2.private_ip} >> private_ips.txt"
+  }
+}
+
+
+========================== Creation-Time and Destroy-Time provisioners ======================
+
+* Creation-Time provisioner
+
+	It only runs during creation..
+	If creation time provisioner fails, the resource is marked as tainted..
+	
+* Destroy-Time provisioner
+
+	It runs before the resource is destroyed...
+	
+### provisioner-types.tf
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_security_group" "allow_ssh" {
+  name = "allow_ssh"
+  description = "Allow SSH inbound traffic"
+
+  ingress {
+    description = "SSH into VPC"
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = [ "0.0.0.0/0" ]
+  }
+
+  egress {
+    description = "SSH into VPC"
+    from_port = 0
+    to_port = 65535
+    protocol = "tcp"
+    cidr_blocks = [ "0.0.0.0/0" ]
+  }
+}
+
+resource "aws_instance" "myec2" {
+  ami = "ami-079db87dc4c10ac91"
+  instance_type = "t2.micro"
+  key_name = "ec2-key"
+  vpc_security_group_ids = [aws_security_group.allow_ssh.id]
+  
+  # creation time provisioner
+  provisioner "remote-exec" {
+    inline = [ "sudo yum -y install nano" ]
+  }
+
+  #Destroy time provisioner
+  provisioner "remote-exec" {
+    when = destroy
+    inline = [ "sudo yum -y remove nano" ]
+  }
+  
+  connection {
+    type = "ssh"
+    user = "ec2-user"
+    private_key = file("./ec2-key.pem")
+    host = self.public_ip
+  }
+}
+
+============================== Provisioner failure behavior =====================
+
+By default, provisioners that fail will also cause the terraform apply itself to fail..
+
+the on_fail setting can be used to this case...
+
+### failure-behavior.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_security_group" "allow_ssh" {
+  name = "allow_ssh"
+  description = "Allow SSH inbound traffic"
+
+  ingress {
+    description = "SSH into VPC"
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    cidr_blocks = [ "0.0.0.0/0" ]
+  }
+
+  /*egress {
+    description = "SSH into VPC"
+    from_port = 0
+    to_port = 65535
+    protocol = "tcp"
+    cidr_blocks = [ "0.0.0.0/0" ]
+  }*/
+}
+
+resource "aws_instance" "myec2" {
+  ami = "ami-079db87dc4c10ac91"
+  instance_type = "t2.micro"
+  key_name = "ec2-key"
+  vpc_security_group_ids = [aws_security_group.allow_ssh.id]
+  
+  # creation time provisioner
+  provisioner "remote-exec" {
+	on_failure = continue					#--> Ignore the error and continue with creation/destruction...
+    inline = [ "sudo yum -y install nano" ]
+  }
+
+  #Destroy time provisioner
+  /*provisioner "remote-exec" {
+    when = destroy
+    inline = [ "sudo yum -y remove nano" ]
+  }*/
+  
+  connection {
+    type = "ssh"
+    user = "ec2-user"
+    private_key = file("./ec2-key.pem")
+    host = self.public_ip
+  }
+}
